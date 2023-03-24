@@ -1,0 +1,305 @@
+# commands SUC.run;
+# Implementation of lagrangian relaxation method for solving 
+#    Stochastic Unit Commitment problems (fast generators + slow generators)
+#    (branch thermal limits are ignored here..)
+# Author: Xingpeng Li, https://rpglab.github.io/
+
+
+printf "\n\n\n##############  Lagrangian Relaxation SUC Program Starts Here ##############\n\n";
+
+model SSCUC_model.mod;
+data dataFile_ieee73.dat;
+
+option solver gurobi;
+option gurobi_options('mipgap=0.02 timelim=90');
+param LBgap := 0.02;   # must be the same with mipgap
+
+
+# define problems
+problem SubProblem_1: gen_supply, reserve, Ugst, Vgst, PowerBal, 
+          PGen1, unitReserve2, unitReserve1, systemReserve, HR_RampUP, HR_RampDN, 
+		  HR_RampUP2, HR_RampDN2, FacetUP, FacetUP2, FacetDN, FacetDN2, SUSD, SUSD2, S1_COST;
+
+problem SubProblem_1_FixSlow: gen_supply, reserve, Ugst, Vgst, LdSheding1, LdSheding2, 
+          PowerBal_LS, PGen1, unitReserve2, unitReserve1, systemReserve, HR_RampUP, 
+		  HR_RampDN, HR_RampUP2, HR_RampDN2, FacetUP, FacetUP2, FacetDN, FacetDN2, 
+		  SUSD, SUSD2, ModelOneFixSlow1, ModelOneFixSlow2, S1_COST_FixSG;
+		  
+problem SubProblem_1_FixSlowTest: gen_supply, reserve, Ugst, Vgst, LdSheding1, LdSheding2, 
+          PowerBal_LS, PGen1, unitReserve2, unitReserve1, systemReserve, HR_RampUP, 
+		  HR_RampDN, HR_RampUP2, HR_RampDN2, FacetUP, FacetUP2, FacetDN, FacetDN2, 
+		  SUSD, SUSD2, ModelOneFixSlow1, ModelOneFixSlow2, S1_COST_FixSGTest;
+
+problem SubProblem_2: Ugt, Vgt, S2_FacetUP, S2_FacetUP2, S2_FacetDN, S2_FacetDN2,
+          S2_SUSD, S2_SUSD2, S2_COST2;
+
+problem SubProblem_2_forUB: Ugt, Vgt, S2_FacetUP, S2_FacetUP2, S2_FacetDN, S2_FacetDN2,
+          S2_SUSD, S2_SUSD2, P2Feasi, S2_COST2;
+		  
+# Initial DUAL VARIABLES value.
+for{g in GEND, r in SCENARIO, t in LOAD: genD_minUP[g] != 1 }
+{
+    let dual_Ugst[g,r,t] := 0;
+    let dual_Vgst[g,r,t] := 0;
+}
+
+param LB; param UB;
+let LB := 0;
+let UB := 5*10^6;
+param MaxIter; let MaxIter:= 100;
+param LBlog {0..MaxIter};  let LBlog[0] := LB;
+param UBlog {0..MaxIter};  let UBlog[0] := UB;
+param UBtemp;
+param lamda; let lamda := 0.2;
+param scale_Init_limit; let scale_Init_limit := 200;
+param same; let same := 0;
+param scale_limit := 1;
+param scalelog {1..MaxIter};
+
+#param step; #let step := 0;
+param steplog {1..MaxIter};
+
+param alpha;
+param temp;
+param Lstar;
+
+param epsilon; let epsilon := 2.0*LBgap;
+param iter; let iter := 1;
+param UpdateIterNum; let UpdateIterNum := 1;
+param UpdateIter; let UpdateIter := 0;
+param gap; let gap := 100;
+param gapAll {0..MaxIter};  let gapAll[0] := gap;
+param LR_Subcost {r in SCENARIO};
+param cost2;
+param feasible;
+
+param temp_gen_supply{g in GEND, r in SCENARIO, t in LOAD}; 
+param temp_reserve {g in GEND, r in SCENARIO, t in LOAD} >= 0;
+param temp_Ugst{g in GEND, r in SCENARIO, t in LOAD};
+param temp_Vgst{g in GEND, r in SCENARIO, t in LOAD} >= 0, <=1;
+param temp_LdSheding1{r in SCENARIO, t in LOAD} >=0;
+param temp_LdSheding2{r in SCENARIO, t in LOAD} >=0;
+
+param temp_Ugt{g in GEND, t in LOAD: genD_minUP[g] != 1 };
+param temp_Vgt{g in GEND, t in LOAD: genD_minUP[g] != 1 };
+
+
+repeat while (  iter <= MaxIter)
+{
+	if (iter == 1)  then
+	{
+        printf "\n\n------------ Initial UB before Iteration ------------\n\n";
+	    let s := 1;
+        let feasible := 1;
+        repeat while ( s <= 30 )
+        {
+    		let {g in GEND, t in LOAD: genD_minUP[g] != 1}  Ugst_update[g,t] := 1;
+            let {g in GEND, t in LOAD: genD_minUP[g] != 1}  Vgst_update[g,t] := 0;
+            solve SubProblem_1_FixSlow;
+            if( sum{t in LOAD}(LdSheding1[s,t] + LdSheding2[s,t]) >= 0.001) then
+            {
+                let feasible := 0;
+				printf "\n\n /////////////////// LdSheding1: %8.4 Initially.  /////////////////// \n\n", sum{t in LOAD}LdSheding1[s,t];
+				printf "\n\n /////////////////// LdSheding2: %8.4 Initially.  /////////////////// \n\n", sum{t in LOAD}LdSheding2[s,t];
+            }
+            display _total_solve_elapsed_time;
+			let LR_Subcost[s] := sum{g in GEND, t in LOAD}windScenProb[s]*(gen_supply[g,s,t]*genC_Cost[g] + Ugst[g,s,t]*genC_NLoad[g] + Vgst[g,s,t]*genC_Startup[g]);
+			let s := s + 1;
+        }
+        if (feasible == 1) then
+        {
+            let UBtemp := 0;
+            let {r in SCENARIO} UBtemp := UBtemp +  LR_Subcost[r];
+            if(UB > UBtemp) then
+            {
+                let UB := UBtemp;
+                let UBlog[0] := UB;
+            }
+		}
+	}
+	
+    printf "\n\n /////////////////// ITERATION %d /////////////////// \n\n", iter;
+    let s := 1;
+    repeat while ( s <= 30 )
+    {
+        printf "\n############## Solving %d-th scenario in %d-th Iteration. ##############", s,iter;
+        solve SubProblem_1;
+        display _total_solve_elapsed_time; 
+        let LR_Subcost[s] := S1_COST;
+        let s := s + 1;
+    }
+
+    printf "\n############## Solving Subproblem_2  in %d-th  Iteration ##############\n", iter;
+    solve SubProblem_2;
+    let cost2 := S2_COST2;
+    display _total_solve_elapsed_time; 
+
+    ## update dual variables
+    let Lstar := 0;
+    let {r in SCENARIO} Lstar := Lstar +  LR_Subcost[r];
+    let Lstar := Lstar + S2_COST2;
+	let Lstar := Lstar / (1 + LBgap);
+    if(LB <= Lstar) then
+    {
+        let LB := Lstar;
+		printf "\n\n---------------- Updating LB  in the %d-th ITERATION  ----------------\n\n", iter;
+    }
+	let temp := sum{g in GEND, r in SCENARIO, t in LOAD: genD_minUP[g] != 1 }
+           ((windScenProb[r] * (Ugst[g,r,t] - Ugt[g,t]))^2
+               +  (windScenProb[r] * (Vgst[g,r,t] - Vgt[g,t]))^2);
+
+    if(UpdateIter == UpdateIterNum-1) then
+    {
+	    let {g in GEND, r in SCENARIO, t in LOAD} temp_gen_supply[g,r,t] := gen_supply[g,r,t];
+		let {g in GEND, r in SCENARIO, t in LOAD} temp_reserve[g,r,t] := reserve[g,r,t];
+		let {g in GEND, r in SCENARIO, t in LOAD} temp_Ugst[g,r,t] := Ugst[g,r,t];
+		let {g in GEND, r in SCENARIO, t in LOAD} temp_Vgst[g,r,t] := Vgst[g,r,t];
+		#let {g in GEND, t in LOAD: genD_minUP[g] != 1 } temp_Ugt[g,t] := Ugt[g,t];
+		#let {g in GEND, t in LOAD: genD_minUP[g] != 1 } temp_Vgt[g,t] := Vgt[g,t];
+		#let {r in SCENARIO, t in LOAD} temp_LdSheding1[r,t] := LdSheding1[r,t];
+		#let {r in SCENARIO, t in LOAD} temp_LdSheding2[r,t] := LdSheding2[r,t];			
+		#solve SubProblem_2_forUB;
+        let {g in GEND, t in LOAD: genD_minUP[g] != 1} Ugst_update[g,t] := Ugt[g,t];
+        let {g in GEND, t in LOAD: genD_minUP[g] != 1} Vgst_update[g,t] := Vgt[g,t];
+		#let {g in GEND, t in LOAD: genD_minUP[g] != 1 } Ugt[g,t] := temp_Ugt[g,t];
+		#let {g in GEND, t in LOAD: genD_minUP[g] != 1 } Vgt[g,t] := temp_Vgt[g,t];
+
+		# for{g in GEND, t in LOAD: genD_minUP[g] != 1}
+		# {
+        #     printf "%5d %5d %8.4f %8.4f %8.4f %8.4f\n", g, t, Ugt[g,t], Ugst_update[g,t], Vgt[g,t], Vgst_update[g,t]  > 111.dat;
+        # }
+		let s := 1;
+        let feasible := 1;
+        repeat while ( s <= 30 )
+        {
+            printf "\n\n---------------- %d-th scenario in %d ITERATION  when Updating Upper Bound ----------------\n\n", s,iter;
+            solve SubProblem_1_FixSlow;
+            if( sum{t in LOAD}(LdSheding1[s,t] + LdSheding2[s,t]) >= 0.001) then
+            {
+                let feasible := 0;
+				printf "\n\n /////////////////// LdSheding1: %8.4f in %d-th iteration.  /////////////////// \n\n", sum{t in LOAD}LdSheding1[s,t], iter;
+				printf "\n\n /////////////////// LdSheding2: %8.4f in %d-th iteration.  /////////////////// \n\n", sum{t in LOAD}LdSheding2[s,t], iter;
+            }
+            display _total_solve_elapsed_time;
+			let LR_Subcost[s] := sum{g in GEND, t in LOAD}windScenProb[s]*(gen_supply[g,s,t]*genC_Cost[g] + Ugst[g,s,t]*genC_NLoad[g] + Vgst[g,s,t]*genC_Startup[g]);
+            let s := s + 1;
+        }
+
+        if (feasible == 1) then
+        {
+            let UBtemp := 0;
+            let {r in SCENARIO} UBtemp := UBtemp + LR_Subcost[r];
+            if(UB > UBtemp) then
+            {
+                let UB := UBtemp;
+				let UBlog[iter] := UB;
+                printf "\n\n------------ Updating UB Successfully in %d-th Iteration-------\n\n", iter;
+            }
+			else
+			{
+                printf "\n\n------------ Not Updating UB in %d-th Iteration-------\n\n", iter;
+			}
+            # let s := 1;
+            # let feasible := 1;
+            # repeat while ( s <= 30 )
+            # {
+            #    if(iter == 1) then
+            #     {
+            #         let {g in GEND, t in LOAD: genD_minUP[g] != 1}  Ugst_update[g,t] := 1;
+            #         let {g in GEND, t in LOAD: genD_minUP[g] != 1}  Vgst_update[g,t] := 0;
+            #     }
+            #     printf "\n\n############## Checking %d-th scenario in %d ITERATION  when Updating Upper Bound ##############\n\n", s,iter;
+            #     solve SubProblem_1_FixSlowTest;
+            #     if( sum{t in LOAD}(LdSheding1[s,t] + LdSheding2[s,t]) >= 0.0001) then
+            #     {
+            #         let feasible := 0;
+            #     }
+            #    display _total_solve_elapsed_time;
+            #     let LR_Subcost[s] := S1_COST_FixSGTest;
+            #    let s := s + 1;
+            # }
+            # if ( abs(sum{r in SCENARIO}LR_Subcost[r] - UBtemp) < 0.001) then
+            # {
+            #     printf "\n\n------------ Correct When Updating UB-------\n\n";
+            # }
+            # else
+            # {
+            #     printf "\n\n------------ Incorrect When Updating UB-------\n\n";
+            #     printf "\n\n UBtemp: %8.3f\n\n",UBtemp;
+            #     printf "\n\n sum{r in SCENARIO}LR_Subcost[r]: %8.3f\n\n",sum{r in SCENARIO}LR_Subcost[r];
+            #     printf "\n\n cost2: %8.3f\n\n",cost2;
+            # }
+        }
+		else
+		{
+		    printf "\n\n------------ Infeasible in %d-th ITERATION  when Updating Upper Bound ------------\n\n", iter;
+			printf "Infeasible in iteratio %5d \n", iter
+		}
+		let UpdateIter := -1;
+		
+		let {g in GEND, r in SCENARIO, t in LOAD} gen_supply[g,r,t] := temp_gen_supply[g,r,t];
+		let {g in GEND, r in SCENARIO, t in LOAD} reserve[g,r,t] := temp_reserve[g,r,t];
+		let {g in GEND, r in SCENARIO, t in LOAD} Ugst[g,r,t] := temp_Ugst[g,r,t];
+		let {g in GEND, r in SCENARIO, t in LOAD} Vgst[g,r,t] := temp_Vgst[g,r,t];
+		#let {r in SCENARIO, t in LOAD} LdSheding1[r,t] := temp_LdSheding1[r,t];
+		#let {r in SCENARIO, t in LOAD} LdSheding2[r,t] := temp_LdSheding2[r,t];				
+    }
+	
+    let LBlog[iter] := LB;
+	let UBlog[iter] := UB;
+	display UB;
+	display LB;
+	
+	if(iter > scale_Init_limit) then
+	{
+		if( same = scale_limit) then
+		{
+		    let lamda := lamda / 2;
+			let same := 0;
+		}
+	}
+	let scalelog[iter] := lamda;
+    let alpha := lamda * (UB - LB) / temp;
+
+	let steplog[iter] := alpha;
+    let {g in GEND, r in SCENARIO, t in LOAD: genD_minUP[g] != 1 } 
+            dual_Ugst[g,r,t] := dual_Ugst[g,r,t] + alpha*windScenProb[r] * (Ugst[g,r,t] - Ugt[g,t]);
+    let {g in GEND, r in SCENARIO, t in LOAD:  genD_minUP[g] != 1}
+            dual_Vgst[g,r,t] := dual_Vgst[g,r,t] + alpha*windScenProb[r] * (Vgst[g,r,t] - Vgt[g,t]);
+
+    if(LB != 0) then
+    {
+        let gap := (UB - LB) / LB ;
+        printf "\n\n------------  The gap for %d-th iteration is:  %8.3f. ------------\n\n", iter, gap;
+        let gapAll[iter] := gap;
+        if(gap <= epsilon) then
+        {
+            printf "Program Converge Succeed after %d-th iterations !!!", iter;
+            break;
+        }
+    }
+	
+	printf "\n\n  %d-th iteration result report" ,iter;
+	display UBlog;
+	display LBlog;
+	display scalelog;
+	display gapAll;
+
+	
+    let iter := iter + 1;	
+	let UpdateIter := UpdateIter + 1;
+	if(iter > scale_Init_limit) then
+	{
+	    let same := same + 1;
+	}
+}
+
+printf "\n\n";
+#display Ugt;
+
+printf "\n\n";
+display LBlog, UBlog;
+display gapAll, scalelog;
+
+
+

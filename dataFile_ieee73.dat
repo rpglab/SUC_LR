@@ -1,0 +1,36 @@
+### Load data:
+
+# Loads the data for the Buses and assigns the columns
+param: BUS: bus_num bus_Pd:= include ieee73_scuc_bus.dat;
+
+# Loads the data for the GENs and assigns the columns
+param: GEND: genD_bus genD_minUP genD_minDN genD_status genD_Pmax genD_Pmin genC_Startup genC_Cost
+genC_NLoad SPRamp NSRamp HRamp StartRamp gen_Style:= 
+include ieee73_scuc_gen.dat; 
+
+param: BRANCH: branch_fbus branch_tbus branch_b branch_rateA branch_rateC monitor:=
+include ieee73_scuc_branch.dat;
+
+# Loads the data for the Load's percentage of peak annual load
+param: LOAD: load_pcnt := include ieee73_scuc_load24.dat;
+
+param: SCENARIO: windScenProb := include ieee73_scuc_prob.dat;
+
+data windPowerData.dat;
+
+
+##defines the hour in the year to be simulated for load
+for{t in LOAD, k in BUS}
+{
+	let Bus_Pd[t,k] := load_pcnt[t]*bus_Pd[k]/MBase;
+};
+
+##calculate the total load at each time.
+for{t in LOAD}
+{
+    let Demand_t[t] := 0;
+};
+for{t in LOAD, k in BUS}
+{
+    let Demand_t[t] := Demand_t[t] + Bus_Pd[t,k];
+};
