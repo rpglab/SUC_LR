@@ -8,9 +8,6 @@ param: GEND: genD_bus genD_minUP genD_minDN genD_status genD_Pmax genD_Pmin genC
 genC_NLoad SPRamp NSRamp HRamp StartRamp gen_Style:= 
 include ieee73_scuc_gen.dat; 
 
-param: BRANCH: branch_fbus branch_tbus branch_b branch_rateA branch_rateC monitor:=
-include ieee73_scuc_branch.dat;
-
 # Loads the data for the Load's percentage of peak annual load
 param: LOAD: load_pcnt := include ieee73_scuc_load24.dat;
 
