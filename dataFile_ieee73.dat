@@ -13,7 +13,8 @@ param: LOAD: load_pcnt := include ieee73_scuc_load24.dat;
 
 param: SCENARIO: windScenProb := include ieee73_scuc_prob.dat;
 
-data windPowerData.dat;
+data windPowerData_case2.dat;
+#data windPowerData_case1.dat;
 
 
 ##defines the hour in the year to be simulated for load
