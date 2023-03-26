@@ -46,11 +46,11 @@ for{g in GEND, r in SCENARIO, t in LOAD: genD_minUP[g] != 1 }
 param LB; param UB;
 let LB := 0;
 let UB := 5*10^6;
-param MaxIter; let MaxIter:= 100;
+param MaxIter; let MaxIter:= 50;
 param LBlog {0..MaxIter};  let LBlog[0] := LB;
 param UBlog {0..MaxIter};  let UBlog[0] := UB;
 param UBtemp;
-param lamda; let lamda := 0.2;
+param lamda; let lamda := 0.05;
 param scale_Init_limit; let scale_Init_limit := 200;
 param same; let same := 0;
 param scale_limit := 1;
@@ -233,7 +233,7 @@ repeat while (  iter <= MaxIter)
 		else
 		{
 		    printf "\n\n------------ Infeasible in %d-th ITERATION  when Updating Upper Bound ------------\n\n", iter;
-			printf "Infeasible in iteratio %5d \n", iter
+			printf "Infeasible in iteration %5d \n", iter
 		}
 		let UpdateIter := -1;
 		
