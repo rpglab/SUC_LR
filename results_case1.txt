@@ -1,3 +1,4 @@
+# For this simulation, desired gap is set to 0.04, and lamda is set to 0.2.
 ampl: reset;
 ampl: commands SUC.run;
 
@@ -82445,5 +82446,4 @@ gapAll [*] :=
 ampl: 
 
 ## results for the 90th-100th does not improve; but the computing time looks weird (the total time jumps up to 160,000s directly from 5,500s);  thus, the results for the 90th-100th are removed. Maybe because the laptop is left running the simulation while it is locked later on - this may affect the computing time.
-# For this simulation, desired gap is set to 0.04, and lamda is set to 0.2.
 
