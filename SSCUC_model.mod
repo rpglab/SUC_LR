@@ -49,7 +49,6 @@ param dual_Vgst {g in GEND, r in SCENARIO, t in LOAD: genD_minUP[g] !=1};  # the
 
 param Ugst_update {g in GEND, t in LOAD: genD_minUP[g] !=1};
 param Vgst_update {g in GEND, t in LOAD: genD_minUP[g] !=1};
-#@@@@@@@@@@@@@@@
 
 param s;
 param penalty; let penalty := 10^9;
